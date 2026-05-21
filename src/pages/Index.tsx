@@ -1,11 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  Download,
-  Shield,
-  Zap,
-  Eye,
-  Clock,
-  ArrowRight,
   Hash,
   Users,
   Mic,
@@ -15,16 +9,142 @@ import {
   Menu,
   X,
   Monitor,
+  Send,
+  LogOut,
+  LogIn,
+  UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+const AUTH_URL = "https://functions.poehali.dev/4d3e041d-3570-45e3-a4e4-f1e752bfc02c";
+const MESSAGES_URL = "https://functions.poehali.dev/a4613d5c-1808-4f26-a7cf-2f5e60dd82c6";
+
+const CHANNELS = ["общий", "флуд", "мемы", "знакомства"];
+const VOICE_CHANNELS = ["Общий", "Игры с друзьями"];
+
+interface User {
+  id: number;
+  username: string;
+  avatar_letter: string;
+  avatar_color: string;
+  token: string;
+}
+
+interface Message {
+  id: number;
+  content: string;
+  created_at: string;
+  channel: string;
+  username: string;
+  avatar_letter: string;
+  avatar_color: string;
+}
+
+function formatTime(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
 
 const Index = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [activeChannel, setActiveChannel] = useState("общий");
+
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem("frenchat_user");
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputText, setInputText] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const loadMessages = async () => {
+    const res = await fetch(`${MESSAGES_URL}?channel=${encodeURIComponent(activeChannel)}`);
+    const data = await res.json();
+    if (data.messages) {
+      setMessages(data.messages);
+    }
+  };
+
+  useEffect(() => {
+    loadMessages();
+    const interval = setInterval(loadMessages, 3000);
+    return () => clearInterval(interval);
+  }, [activeChannel]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError("");
+    setAuthLoading(true);
+    try {
+      const res = await fetch(AUTH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: authMode, username: authUsername, password: authPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setAuthError(data.error || "Ошибка");
+      } else {
+        localStorage.setItem("frenchat_user", JSON.stringify(data.user));
+        setUser(data.user);
+        setAuthUsername("");
+        setAuthPassword("");
+      }
+    } catch {
+      setAuthError("Ошибка соединения");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || !user || sending) return;
+    setSending(true);
+    const content = inputText.trim();
+    setInputText("");
+    try {
+      await fetch(MESSAGES_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Id": String(user.id),
+          "X-Auth-Token": user.token,
+        },
+        body: JSON.stringify({ content, channel: activeChannel }),
+      });
+      await loadMessages();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("frenchat_user");
+    setUser(null);
+  };
 
   return (
     <div className="min-h-screen bg-[#36393f] text-white overflow-x-hidden">
-      {/* Навигация в стиле Discord */}
+      {/* Навигация */}
       <nav className="bg-[#2f3136] border-b border-[#202225] px-4 sm:px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3 sm:gap-4">
@@ -37,9 +157,20 @@ const Index = () => {
             </div>
           </div>
           <div className="hidden sm:flex items-center gap-4">
+            {user ? (
+              <Button
+                variant="ghost"
+                className="text-[#b9bbbe] hover:text-white hover:bg-[#40444b]"
+                onClick={handleLogout}
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Выйти
+              </Button>
+            ) : (
               <Button className="bg-[#5865f2] hover:bg-[#4752c4] text-white px-6 py-2 rounded text-sm font-medium">
-              Начать общение
-            </Button>
+                Начать общение
+              </Button>
+            )}
           </div>
           <Button
             variant="ghost"
@@ -49,22 +180,31 @@ const Index = () => {
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </Button>
         </div>
-
-        {/* Мобильное меню */}
         {mobileMenuOpen && (
           <div className="sm:hidden mt-4 pt-4 border-t border-[#202225]">
             <div className="flex flex-col gap-3">
+              {user ? (
+                <Button
+                  variant="ghost"
+                  className="text-[#b9bbbe] hover:text-white hover:bg-[#40444b] justify-start"
+                  onClick={handleLogout}
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Выйти
+                </Button>
+              ) : (
                 <Button className="bg-[#5865f2] hover:bg-[#4752c4] text-white px-6 py-2 rounded text-sm font-medium">
-                Начать общение
-              </Button>
+                  Начать общение
+                </Button>
+              )}
             </div>
           </div>
         )}
       </nav>
 
-      {/* Макет в стиле Discord */}
-      <div className="flex min-h-screen">
-        {/* Боковая панель серверов - скрыта на мобильных */}
+      {/* Макет Discord */}
+      <div className="flex" style={{ height: "calc(100vh - 73px)" }}>
+        {/* Боковая панель серверов */}
         <div className="hidden lg:flex w-[72px] bg-[#202225] flex-col items-center py-3 gap-2">
           <div className="w-12 h-12 bg-[#5865f2] rounded-2xl hover:rounded-xl transition-all duration-200 flex items-center justify-center cursor-pointer">
             <Monitor className="w-6 h-6 text-white" />
@@ -80,379 +220,235 @@ const Index = () => {
           ))}
         </div>
 
-        {/* Основной контент */}
-        <div className="flex-1 flex flex-col lg:flex-row">
-          {/* Боковая панель каналов */}
-          <div
-            className={`${mobileSidebarOpen ? "block" : "hidden"} lg:block w-full lg:w-60 bg-[#2f3136] flex flex-col`}
-          >
-            <div className="p-4 border-b border-[#202225] flex items-center justify-between">
-              <h2 className="text-white font-semibold text-base">ФренЧат</h2>
-              <Button
-                variant="ghost"
-                className="lg:hidden text-[#b9bbbe] hover:text-white hover:bg-[#40444b] p-1"
-                onClick={() => setMobileSidebarOpen(false)}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="flex-1 p-2">
-              <div className="mb-4">
-                <div className="flex items-center gap-1 px-2 py-1 text-[#8e9297] text-xs font-semibold uppercase tracking-wide">
-                  <ArrowRight className="w-3 h-3" />
-                  <span>Текстовые каналы</span>
-                </div>
-                <div className="mt-1 space-y-0.5">
-                  {["общий", "флуд", "мемы", "знакомства"].map((channel) => (
-                    <div
-                      key={channel}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded text-[#8e9297] hover:text-[#dcddde] hover:bg-[#393c43] cursor-pointer"
-                    >
-                      <Hash className="w-4 h-4" />
-                      <span className="text-sm">{channel}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-1 px-2 py-1 text-[#8e9297] text-xs font-semibold uppercase tracking-wide">
-                  <ArrowRight className="w-3 h-3" />
-                  <span>Голосовые каналы</span>
-                </div>
-                <div className="mt-1 space-y-0.5">
-                  {["Общий", "Игры с друзьями"].map((channel) => (
-                    <div
-                      key={channel}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded text-[#8e9297] hover:text-[#dcddde] hover:bg-[#393c43] cursor-pointer"
-                    >
-                      <Mic className="w-4 h-4" />
-                      <span className="text-sm">{channel}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            {/* Область пользователя */}
-            <div className="p-2 bg-[#292b2f] flex items-center gap-2">
-              <div className="w-8 h-8 bg-[#5865f2] rounded-full flex items-center justify-center">
-                <span className="text-white text-sm font-medium">А</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-white text-sm font-medium truncate">Алексей</div>
-                <div className="text-[#b9bbbe] text-xs truncate">#1234</div>
-              </div>
-              <div className="flex gap-1">
-                <Button variant="ghost" size="sm" className="w-8 h-8 p-0 hover:bg-[#40444b]">
-                  <Mic className="w-4 h-4 text-[#b9bbbe]" />
-                </Button>
-                <Button variant="ghost" size="sm" className="w-8 h-8 p-0 hover:bg-[#40444b]">
-                  <Settings className="w-4 h-4 text-[#b9bbbe]" />
-                </Button>
-              </div>
-            </div>
+        {/* Каналы */}
+        <div className={`${mobileSidebarOpen ? "block" : "hidden"} lg:block w-full lg:w-60 bg-[#2f3136] flex flex-col flex-shrink-0`}>
+          <div className="p-4 border-b border-[#202225] flex items-center justify-between">
+            <h2 className="text-white font-semibold text-base">ФренЧат</h2>
+            <Button
+              variant="ghost"
+              className="lg:hidden text-[#b9bbbe] hover:text-white hover:bg-[#40444b] p-1"
+              onClick={() => setMobileSidebarOpen(false)}
+            >
+              <X className="w-4 h-4" />
+            </Button>
           </div>
-
-          {/* Область чата */}
-          <div className="flex-1 flex flex-col">
-            {/* Заголовок чата */}
-            <div className="h-12 bg-[#36393f] border-b border-[#202225] flex items-center px-4 gap-2">
-              <Button
-                variant="ghost"
-                className="lg:hidden text-[#8e9297] hover:text-[#dcddde] hover:bg-[#40444b] p-1 mr-2"
-                onClick={() => setMobileSidebarOpen(true)}
-              >
-                <Menu className="w-5 h-5" />
-              </Button>
-              <Hash className="w-5 h-5 text-[#8e9297]" />
-              <span className="text-white font-semibold">общий</span>
-              <div className="w-px h-6 bg-[#40444b] mx-2 hidden sm:block"></div>
-              <span className="text-[#8e9297] text-sm hidden sm:block">Болтай с друзьями в любое время</span>
-              <div className="ml-auto flex items-center gap-2 sm:gap-4">
-                <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-[#b9bbbe] cursor-pointer hover:text-[#dcddde]" />
-                <Users className="w-4 h-4 sm:w-5 sm:h-5 text-[#b9bbbe] cursor-pointer hover:text-[#dcddde]" />
-                <Search className="w-4 h-4 sm:w-5 sm:h-5 text-[#b9bbbe] cursor-pointer hover:text-[#dcddde]" />
-              </div>
-            </div>
-
-            {/* Сообщения чата */}
-            <div className="flex-1 p-2 sm:p-4 space-y-4 sm:space-y-6 overflow-y-auto">
-              {/* Приветственное сообщение */}
-              <div className="flex gap-2 sm:gap-4">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-[#5865f2] rounded-full flex items-center justify-center flex-shrink-0">
-                  <Monitor className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="text-white font-medium text-sm sm:text-base">Дискордик Бот</span>
-                    <span className="bg-[#5865f2] text-white text-xs px-1 rounded">БОТ</span>
-                    <span className="text-[#72767d] text-xs hidden sm:inline">Сегодня в 12:00</span>
-                  </div>
-                  <div className="text-[#dcddde] text-sm sm:text-base">
-                    <p className="mb-3 sm:mb-4">
-                      <strong>Добро пожаловать в ФренЧат!</strong> Место, где общение с друзьями становится легче и веселее.
-                    </p>
-                    <div className="bg-[#2f3136] border-l-4 border-[#5865f2] p-3 sm:p-4 rounded">
-                      <h3 className="text-white font-semibold mb-2 text-sm sm:text-base">Что умеет ФренЧат:</h3>
-                      <ul className="space-y-1 text-xs sm:text-sm text-[#b9bbbe]">
-                        <li>Текстовые и голосовые чаты с друзьями</li>
-                        <li>Видишь, кто онлайн прямо сейчас</li>
-                        <li>Создавай комнаты по интересам</li>
-                        <li>Делись медиа, стикерами и реакциями</li>
-                        <li>Работает на всех устройствах</li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Сообщение пользователя с Rich Presence */}
-              <div className="flex gap-2 sm:gap-4">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs sm:text-sm font-medium">М</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="text-white font-medium text-sm sm:text-base">Мария Дизайнер</span>
-                    <span className="text-[#72767d] text-xs hidden sm:inline">Сегодня в 12:05</span>
-                  </div>
-                  <div className="text-[#dcddde] mb-3 text-sm sm:text-base">
-                    Привет всем! Кто сегодня вечером онлайн? Давайте зависнем 🎮
-                  </div>
-
-                  {/* Демо Rich Presence */}
-                  <div className="bg-[#2f3136] border border-[#202225] rounded-lg overflow-hidden w-full max-w-sm">
-                    {/* Заголовок профиля */}
-                    <div className="h-16 sm:h-20 bg-gradient-to-r from-[#5865f2] to-[#7c3aed] relative">
-                      <div className="absolute -bottom-3 sm:-bottom-4 left-3 sm:left-4">
-                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 border-[#2f3136] bg-[#36393f] overflow-hidden">
-                          <div className="w-full h-full bg-gradient-to-br from-[#4f46e5] to-[#7c3aed] flex items-center justify-center">
-                            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-[#2f3136] rounded-full flex items-center justify-center">
-                              <span className="text-lg sm:text-2xl">M</span>
-                            </div>
-                          </div>
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 sm:w-6 sm:h-6 bg-[#3ba55c] border-4 border-[#2f3136] rounded-full"></div>
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        className="absolute top-2 sm:top-4 right-2 sm:right-4 bg-[#4f545c] hover:bg-[#5d6269] text-white text-xs px-2 sm:px-3 py-1 rounded"
-                      >
-                        <Settings className="w-3 h-3 mr-1" />
-                        <span className="hidden sm:inline">Профиль</span>
-                      </Button>
-                    </div>
-
-                    {/* Информация профиля */}
-                    <div className="pt-4 sm:pt-6 px-3 sm:px-4 pb-3 sm:pb-4">
-                      <div className="mb-3 sm:mb-4">
-                        <h3 className="text-white text-lg sm:text-xl font-bold mb-1">Мария</h3>
-                        <div className="flex items-center gap-2 text-[#b9bbbe] text-xs sm:text-sm">
-                          <span>maria_design</span>
-                          <span>-</span>
-                          <span>Она</span>
-                          <div className="flex gap-1 ml-2">
-                            <div className="w-3 h-3 sm:w-4 sm:h-4 bg-[#5865f2] rounded-sm"></div>
-                            <div className="w-3 h-3 sm:w-4 sm:h-4 bg-[#3ba55c] rounded-sm"></div>
-                            <div className="w-3 h-3 sm:w-4 sm:h-4 bg-[#faa61a] rounded-sm"></div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Статусное сообщение */}
-                      <div className="mb-3 sm:mb-4">
-                        <div className="bg-[#36393f] rounded-lg p-2 sm:p-3 relative">
-                          <div className="absolute -top-2 left-3 sm:left-4 w-4 h-4 bg-[#36393f] rotate-45"></div>
-                          <div className="flex items-center gap-2 text-[#dcddde] text-xs sm:text-sm">
-                            <div className="w-3 h-3 sm:w-4 sm:h-4 bg-[#5865f2] rounded-full flex items-center justify-center">
-                              <span className="text-xs">*</span>
-                            </div>
-                            <span>Работаю над проектом...</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Вкладки */}
-                      <div className="flex border-b border-[#40444b] mb-3 sm:mb-4">
-                        <button className="px-3 sm:px-4 py-2 text-[#8e9297] text-xs sm:text-sm font-medium hover:text-[#dcddde]">
-                          Обо мне
-                        </button>
-                        <button className="px-3 sm:px-4 py-2 text-white text-xs sm:text-sm font-medium border-b-2 border-[#5865f2]">
-                          Активность
-                        </button>
-                      </div>
-
-                      {/* Активность Дискордик */}
-                      <div>
-                        <div className="flex items-center gap-2 text-[#8e9297] text-xs font-semibold uppercase tracking-wide mb-2 sm:mb-3">
-                          <span>Играет</span>
-                        </div>
-
-                        <div className="flex items-start gap-2 sm:gap-3 p-2 sm:p-3 bg-[#36393f] rounded-lg">
-                          {/* Логотип Figma */}
-                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-[#ff7262] to-[#f24e1e] rounded-lg flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M15.852 8.981h-4.588V0h4.588c2.476 0 4.49 2.014 4.49 4.49s-2.014 4.491-4.49 4.491zM12.735 7.51h3.117c1.665 0 3.019-1.355 3.019-3.019s-1.354-3.019-3.019-3.019h-3.117V7.51zm0 1.471H8.148c-2.476 0-4.49-2.015-4.49-4.49S5.672 0 8.148 0h4.588v8.981zm-4.587-7.51c-1.665 0-3.019 1.355-3.019 3.019s1.354 3.02 3.019 3.02h3.117V1.471H8.148zm4.587 15.019H8.148c-2.476 0-4.49-2.014-4.49-4.49s2.014-4.49 4.49-4.49h4.588v8.98zM8.148 8.981c-1.665 0-3.019 1.355-3.019 3.019s1.355 3.019 3.019 3.019h3.117V8.981H8.148zM8.172 24c-2.489 0-4.515-2.014-4.515-4.49s2.014-4.49 4.49-4.49h4.588v4.441c0 2.503-2.047 4.539-4.563 4.539zm-.024-7.51a3.023 3.023 0 0 0-3.019 3.019c0 1.665 1.365 3.019 3.044 3.019 1.705 0 3.093-1.376 3.093-3.068v-2.97H8.148z" />
-                            </svg>
-                          </div>
-
-                          {/* Детали активности */}
-                          <div className="flex-1 min-w-0">
-                            <div className="text-white font-semibold text-xs sm:text-sm mb-1">ФренЧат</div>
-                            <div className="text-[#dcddde] text-xs sm:text-sm mb-1">Играет в Among Us</div>
-                            <div className="text-[#b9bbbe] text-xs sm:text-sm mb-2">В сети на ПК</div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 bg-[#3ba55c] rounded-full animate-pulse"></div>
-                              <span className="text-[#3ba55c] text-xs font-medium">0:37 прошло</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Еще одно сообщение пользователя */}
-              <div className="flex gap-2 sm:gap-4">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-r from-green-500 to-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs sm:text-sm font-medium">И</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <span className="text-white font-medium text-sm sm:text-base">Иван UX</span>
-                    <span className="text-[#72767d] text-xs hidden sm:inline">Сегодня в 12:08</span>
-                  </div>
-                  <div className="text-[#dcddde] text-sm sm:text-base">
-                    Я в деле! ФренЧат — лучшее место для тусовки 🔥
-                  </div>
-                </div>
-              </div>
-
-              {/* Секция "Начало работы" */}
-              <div className="bg-[#2f3136] border border-[#202225] rounded-lg p-4 sm:p-6 mt-6 sm:mt-8">
-                <h2 className="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center gap-2">
-                  <Users className="w-5 h-5 sm:w-6 sm:h-6 text-[#5865f2]" />
-                  Начни общаться прямо сейчас
-                </h2>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
-                  <div className="text-center">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#5865f2] rounded-full flex items-center justify-center mx-auto mb-3">
-                      <span className="text-white font-bold text-sm sm:text-base">1</span>
-                    </div>
-                    <h3 className="text-white font-medium mb-2 text-sm sm:text-base">Создай аккаунт</h3>
-                    <p className="text-[#b9bbbe] text-xs sm:text-sm">Регистрация за 30 секунд — никаких лишних шагов</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#5865f2] rounded-full flex items-center justify-center mx-auto mb-3">
-                      <span className="text-white font-bold text-sm sm:text-base">2</span>
-                    </div>
-                    <h3 className="text-white font-medium mb-2 text-sm sm:text-base">Позови друзей</h3>
-                    <p className="text-[#b9bbbe] text-xs sm:text-sm">Отправь ссылку — и вся компания уже вместе</p>
-                  </div>
-                  <div className="text-center">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#5865f2] rounded-full flex items-center justify-center mx-auto mb-3">
-                      <span className="text-white font-bold text-sm sm:text-base">3</span>
-                    </div>
-                    <h3 className="text-white font-medium mb-2 text-sm sm:text-base">Общайся!</h3>
-                    <p className="text-[#b9bbbe] text-xs sm:text-sm">Чат, голос, медиа — всё в одном месте</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  <Button className="bg-[#5865f2] hover:bg-[#4752c4] text-white px-6 sm:px-8 py-2 sm:py-3 rounded text-sm font-medium">
-                    <Users className="w-4 h-4 mr-2" />
-                    Зарегистрироваться
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="border-[#4f545c] text-[#b9bbbe] hover:bg-[#40444b] hover:border-[#6d6f78] px-6 sm:px-8 py-2 sm:py-3 rounded text-sm font-medium bg-transparent"
-                  >
-                    <Shield className="w-4 h-4 mr-2" />
-                    Войти в аккаунт
-                  </Button>
-                </div>
-              </div>
-
-              {/* Преимущества */}
-              <div className="bg-[#2f3136] border border-[#202225] rounded-lg p-4 sm:p-6">
-                <h3 className="text-lg sm:text-xl font-bold text-white mb-4">Почему ФренЧат?</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                  {[
-                    {
-                      icon: <Zap className="w-4 h-4 sm:w-5 sm:h-5" />,
-                      title: "Молниеносная скорость",
-                      desc: "Сообщения доставляются мгновенно",
-                    },
-                    {
-                      icon: <Eye className="w-4 h-4 sm:w-5 sm:h-5" />,
-                      title: "Видишь, кто онлайн",
-                      desc: "Всегда знаешь, кто из друзей доступен",
-                    },
-                    {
-                      icon: <Clock className="w-4 h-4 sm:w-5 sm:h-5" />,
-                      title: "История чатов",
-                      desc: "Вся переписка сохраняется навсегда",
-                    },
-                    {
-                      icon: <Shield className="w-4 h-4 sm:w-5 sm:h-5" />,
-                      title: "Приватность прежде всего",
-                      desc: "Твои разговоры только твои",
-                    },
-                  ].map((feature, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded hover:bg-[#36393f] transition-colors"
-                    >
-                      <div className="text-[#5865f2] mt-0.5">{feature.icon}</div>
-                      <div>
-                        <div className="text-white font-medium text-xs sm:text-sm">{feature.title}</div>
-                        <div className="text-[#b9bbbe] text-xs sm:text-sm">{feature.desc}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Поле ввода сообщения */}
-            <div className="p-2 sm:p-4">
-              <div className="bg-[#40444b] rounded-lg px-3 sm:px-4 py-2 sm:py-3">
-                <div className="text-[#72767d] text-xs sm:text-sm">Сообщение #общий</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Боковая панель участников - скрыта на мобильных/планшетах */}
-          <div className="hidden xl:block w-60 bg-[#2f3136] p-4">
+          <div className="flex-1 p-2 overflow-y-auto">
             <div className="mb-4">
-              <h3 className="text-[#8e9297] text-xs font-semibold uppercase tracking-wide mb-2">В сети - 3</h3>
-              <div className="space-y-2">
-                {[
-                  {
-                    name: "Мария",
-                    status: "Играет в Among Us",
-                    avatar: "М",
-                    color: "from-purple-500 to-pink-500",
-                  },
-                  { name: "Иван", status: "В сети", avatar: "И", color: "from-green-500 to-blue-500" },
-                  { name: "Алексей", status: "Слушает музыку", avatar: "А", color: "from-blue-500 to-purple-500" },
-                ].map((user, index) => (
-                  <div key={index} className="flex items-center gap-3 p-2 rounded hover:bg-[#36393f] cursor-pointer">
-                    <div
-                      className={`w-8 h-8 bg-gradient-to-r ${user.color} rounded-full flex items-center justify-center relative`}
-                    >
-                      <span className="text-white text-sm font-medium">{user.avatar}</span>
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-[#3ba55c] border-2 border-[#2f3136] rounded-full"></div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-white text-sm font-medium truncate">{user.name}</div>
-                      <div className="text-[#b9bbbe] text-xs truncate">{user.status}</div>
-                    </div>
+              <div className="flex items-center gap-1 px-2 py-1 text-[#8e9297] text-xs font-semibold uppercase tracking-wide">
+                <span>Текстовые каналы</span>
+              </div>
+              <div className="mt-1 space-y-0.5">
+                {CHANNELS.map((channel) => (
+                  <div
+                    key={channel}
+                    onClick={() => { setActiveChannel(channel); setMobileSidebarOpen(false); }}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer ${
+                      activeChannel === channel
+                        ? "bg-[#393c43] text-[#dcddde]"
+                        : "text-[#8e9297] hover:text-[#dcddde] hover:bg-[#393c43]"
+                    }`}
+                  >
+                    <Hash className="w-4 h-4" />
+                    <span className="text-sm">{channel}</span>
                   </div>
                 ))}
               </div>
             </div>
+            <div>
+              <div className="flex items-center gap-1 px-2 py-1 text-[#8e9297] text-xs font-semibold uppercase tracking-wide">
+                <span>Голосовые каналы</span>
+              </div>
+              <div className="mt-1 space-y-0.5">
+                {VOICE_CHANNELS.map((channel) => (
+                  <div
+                    key={channel}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded text-[#8e9297] hover:text-[#dcddde] hover:bg-[#393c43] cursor-pointer"
+                  >
+                    <Mic className="w-4 h-4" />
+                    <span className="text-sm">{channel}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Пользователь внизу */}
+          <div className="p-2 bg-[#292b2f] flex items-center gap-2">
+            {user ? (
+              <>
+                <div className={`w-8 h-8 bg-gradient-to-r ${user.avatar_color} rounded-full flex items-center justify-center flex-shrink-0`}>
+                  <span className="text-white text-sm font-medium">{user.avatar_letter}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-white text-sm font-medium truncate">{user.username}</div>
+                  <div className="text-[#3ba55c] text-xs">В сети</div>
+                </div>
+                <Button variant="ghost" size="sm" className="w-8 h-8 p-0 hover:bg-[#40444b]" onClick={handleLogout}>
+                  <LogOut className="w-4 h-4 text-[#b9bbbe]" />
+                </Button>
+              </>
+            ) : (
+              <div className="flex-1 text-[#b9bbbe] text-xs">Войди чтобы писать</div>
+            )}
+          </div>
+        </div>
+
+        {/* Основная область */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Заголовок канала */}
+          <div className="h-12 bg-[#36393f] border-b border-[#202225] flex items-center px-4 gap-2 flex-shrink-0">
+            <Button
+              variant="ghost"
+              className="lg:hidden text-[#8e9297] hover:text-[#dcddde] hover:bg-[#40444b] p-1 mr-2"
+              onClick={() => setMobileSidebarOpen(true)}
+            >
+              <Menu className="w-5 h-5" />
+            </Button>
+            <Hash className="w-5 h-5 text-[#8e9297]" />
+            <span className="text-white font-semibold">{activeChannel}</span>
+            <div className="w-px h-6 bg-[#40444b] mx-2 hidden sm:block"></div>
+            <span className="text-[#8e9297] text-sm hidden sm:block">Болтай с друзьями в любое время</span>
+            <div className="ml-auto flex items-center gap-2 sm:gap-4">
+              <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-[#b9bbbe] cursor-pointer hover:text-[#dcddde]" />
+              <Users className="w-4 h-4 sm:w-5 sm:h-5 text-[#b9bbbe] cursor-pointer hover:text-[#dcddde]" />
+              <Search className="w-4 h-4 sm:w-5 sm:h-5 text-[#b9bbbe] cursor-pointer hover:text-[#dcddde]" />
+            </div>
+          </div>
+
+          {/* Сообщения */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {!user && (
+              /* Форма авторизации */
+              <div className="flex items-center justify-center h-full">
+                <div className="bg-[#2f3136] border border-[#202225] rounded-lg p-6 w-full max-w-sm">
+                  <div className="flex gap-2 mb-6">
+                    <button
+                      onClick={() => { setAuthMode("login"); setAuthError(""); }}
+                      className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${
+                        authMode === "login"
+                          ? "bg-[#5865f2] text-white"
+                          : "bg-[#40444b] text-[#b9bbbe] hover:text-white"
+                      }`}
+                    >
+                      <LogIn className="w-4 h-4 inline mr-1" />
+                      Войти
+                    </button>
+                    <button
+                      onClick={() => { setAuthMode("register"); setAuthError(""); }}
+                      className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${
+                        authMode === "register"
+                          ? "bg-[#5865f2] text-white"
+                          : "bg-[#40444b] text-[#b9bbbe] hover:text-white"
+                      }`}
+                    >
+                      <UserPlus className="w-4 h-4 inline mr-1" />
+                      Регистрация
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleAuth} className="space-y-4">
+                    <div>
+                      <label className="text-[#8e9297] text-xs font-semibold uppercase block mb-1">Имя пользователя</label>
+                      <input
+                        type="text"
+                        value={authUsername}
+                        onChange={(e) => setAuthUsername(e.target.value)}
+                        placeholder="Введи своё имя"
+                        className="w-full bg-[#40444b] text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#5865f2] placeholder-[#72767d]"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[#8e9297] text-xs font-semibold uppercase block mb-1">Пароль</label>
+                      <input
+                        type="password"
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-[#40444b] text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#5865f2] placeholder-[#72767d]"
+                        required
+                      />
+                    </div>
+                    {authError && (
+                      <div className="text-red-400 text-sm bg-red-900/20 rounded px-3 py-2">{authError}</div>
+                    )}
+                    <Button
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full bg-[#5865f2] hover:bg-[#4752c4] text-white font-medium"
+                    >
+                      {authLoading ? "Загрузка..." : authMode === "login" ? "Войти" : "Зарегистрироваться"}
+                    </Button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {user && messages.length === 0 && (
+              <div className="text-center text-[#72767d] py-8">
+                <Hash className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="text-lg font-semibold text-[#b9bbbe]">Добро пожаловать в #{activeChannel}!</p>
+                <p className="text-sm">Стань первым, кто напишет сюда.</p>
+              </div>
+            )}
+
+            {user && messages.map((msg, i) => {
+              const prevMsg = messages[i - 1];
+              const sameUser = prevMsg && prevMsg.username === msg.username;
+              return (
+                <div key={msg.id} className={`flex gap-3 sm:gap-4 group ${sameUser ? "mt-0.5" : "mt-4"}`}>
+                  {sameUser ? (
+                    <div className="w-8 sm:w-10 flex-shrink-0 flex items-start justify-center pt-1">
+                      <span className="text-[#72767d] text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                        {formatTime(msg.created_at)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className={`w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-r ${msg.avatar_color} rounded-full flex items-center justify-center flex-shrink-0 mt-0.5`}>
+                      <span className="text-white text-xs sm:text-sm font-medium">{msg.avatar_letter}</span>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {!sameUser && (
+                      <div className="flex items-baseline gap-2 mb-1">
+                        <span className="text-white font-medium text-sm sm:text-base">{msg.username}</span>
+                        <span className="text-[#72767d] text-xs hidden sm:inline">Сегодня в {formatTime(msg.created_at)}</span>
+                      </div>
+                    )}
+                    <div className="text-[#dcddde] text-sm sm:text-base break-words">{msg.content}</div>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Поле ввода */}
+          <div className="p-2 sm:p-4 flex-shrink-0">
+            {user ? (
+              <form onSubmit={handleSend} className="flex gap-2">
+                <div className="flex-1 bg-[#40444b] rounded-lg px-3 sm:px-4 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    placeholder={`Сообщение #${activeChannel}`}
+                    className="flex-1 bg-transparent text-white text-sm sm:text-base py-2 sm:py-3 outline-none placeholder-[#72767d]"
+                    maxLength={2000}
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  disabled={!inputText.trim() || sending}
+                  className="bg-[#5865f2] hover:bg-[#4752c4] text-white px-3 py-2 sm:py-3 rounded-lg"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </form>
+            ) : (
+              <div className="bg-[#40444b] rounded-lg px-4 py-3 text-[#72767d] text-sm">
+                Войди в аккаунт, чтобы писать сообщения
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "Get messages from channel",
+      "method": "GET",
+      "path": "/?channel=общий",
+      "expectedStatus": 200,
+      "expectedBody": {"messages": []},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
